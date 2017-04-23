@@ -20,6 +20,9 @@ echo "export PATH=$HOME/anaconda/bin:$PATH" >> $HOME/.bashrc
 # Download spaCy
 $HOME/anaconda/bin/conda install -y spacy
 
+# Download boto3
+$HOME/anaconda/bin/conda install -y boto3
+
 # Download English module to /mnt/spacy_en_data
 sudo mkdir /mnt/spacy_en_data
 sudo chown -R hadoop:hadoop /mnt/spacy_en_data
