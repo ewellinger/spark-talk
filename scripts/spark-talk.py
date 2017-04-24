@@ -190,7 +190,6 @@ def indexing_pipeline(input_df, **kwargs):
 if __name__=='__main__':
     log = S3Logging('spark-talk', 'application-log.txt', overwrite_existing=True)
 
-    log.write("Please work", True)
 
     # Get or Create a new SparkSession object
     spark = ps.sql.SparkSession.builder \
@@ -219,7 +218,6 @@ if __name__=='__main__':
     #                          format='json')
 
     print(review_subset.count())
-    log.write("Successfully counted shit", True)
     # log.write(review_subset.count())
     #
     # log.write(review_subset.show(10, truncate=True), True)
