@@ -23,6 +23,9 @@ $HOME/anaconda/bin/conda install -y spacy
 # Download boto3
 $HOME/anaconda/bin/conda install -y boto3
 
+# Download future package
+$HOME/anaconda/bin/conda install -y future
+
 # Download English module to /mnt/spacy_en_data
 sudo mkdir /mnt/spacy_en_data
 sudo chown -R hadoop:hadoop /mnt/spacy_en_data
