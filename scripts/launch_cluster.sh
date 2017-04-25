@@ -20,7 +20,7 @@ aws emr create-cluster \
     --ec2-attributes KeyName=$2 \
     --use-default-roles \
     --instance-groups \
-      InstanceGroupType=MASTER,InstanceCount=1,InstanceType=m3.xlarge \
-      InstanceGroupType=CORE,InstanceCount=$3,InstanceType=m3.xlarge \
+      InstanceGroupType=MASTER,InstanceCount=1,InstanceType=m2.4xlarge \
+      InstanceGroupType=CORE,InstanceCount=$3,InstanceType=m2.4xlarge \
     --bootstrap-actions Path=s3://$1/scripts/bootstrap-emr.sh \
     --configurations file://./myConfig.json

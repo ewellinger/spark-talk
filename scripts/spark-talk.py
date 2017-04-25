@@ -123,6 +123,10 @@ def extract_bow_from_raw_text(text_as_string):
     -------
     list : the list of the tokens extracted and filtered from the text
     """
+    if '/home/hadoop/anaconda/lib/python2.7/site-packages' not in sys.path:
+        sys.path = ['/home/hadoop/anaconda/lib/python2.7/site-packages'] + sys.path
+    import spacy
+
     if (text_as_string == None):
         return []
 
@@ -140,7 +144,7 @@ def extract_bow_from_raw_text(text_as_string):
             nlp = spacy.load('en', via='/mnt/spacy_en_data/')
 
     # Run through spacy English module
-    doc = nlp(text_as_string)
+    doc = nlp(unicode(text_as_string))
 
     # Part's of speech to keep in the result
     pos_lst = ['ADJ', 'ADV', 'NOUN', 'PROPN', 'VERB']
@@ -188,8 +192,9 @@ def indexing_pipeline(input_df, **kwargs):
 
 
 if __name__=='__main__':
-    log = S3Logging('spark-talk', 'application-log.txt', overwrite_existing=True)
+    log = S3Logging('spark-talk', 'application-log.txt', overwrite_existing=True, redirect_stderr=True)
 
+    log.write("Starting execution...", True)
 
     # Get or Create a new SparkSession object
     spark = ps.sql.SparkSession.builder \
@@ -197,50 +202,56 @@ if __name__=='__main__':
                 .getOrCreate()
 
     # Extract Spark Context from SparkSession object
-    sc = spark.sparkContext
+    # sc = spark.sparkContext
     # sc.setLogLevel('ERROR')
 
     # Create logging object for writing to S3
     # log = S3Logging('spark-talk', 'application-log.txt', overwrite_existing=True, redirect_stderr=True)
 
-    # Use SparkSession to read in json object into Spark DataFrame
-    url = "s3n://galvanize-ds/reviews_Books_5.json.gz"
-    reviews = spark.read.json(url)
-
-    # log.write(reviews.printSchema(), True)
-
-    # Let's subset our DataFrame to keep 5% of the reviews
-    review_subset = reviews.select('reviewText', 'overall') \
-                           .sample(False, 0.02, 42)
-
-    # Save this subset file to S3
-    # review_subset.write.save('s3n://spark-talk/reviews_Books_subset2.json',
+    # # Use SparkSession to read in json object into Spark DataFrame
+    # url = "s3n://spark-talk/reviews_Books_5.json.gz"
+    # reviews = spark.read.json(url)
+    #
+    # # log.write(reviews.printSchema(), True)
+    #
+    # # Let's subset our DataFrame to keep 5% of the reviews
+    # review_subset = reviews.select('reviewText', 'overall') \
+    #                        .sample(False, 0.05, 42)
+    #
+    # # Save this subset file to S3
+    # review_subset.write.save('s3n://spark-talk/reviews_Books_subset5.json',
     #                          format='json')
 
-    print(review_subset.count())
-    # log.write(review_subset.count())
-    #
+    url = 's3n://spark-talk/reviews_Books_subset5.json'
+    review_subset = spark.read.json(url)
+
+    count = review_subset.count()
+    log.write("reviews_Books_subset5.json contains {} elements".format(count), True)
+
+    # log.write("First 10 rows of review_subset DataFrame...")
     # log.write(review_subset.show(10, truncate=True), True)
-
-
+    #
+    # log.write("review_subset schema...")
+    # log.write(review_subset.printSchema(), True)
 
     review_df, vocab = indexing_pipeline(review_subset, inputCol='reviewText')
-
-    review_df.printSchema()
+    log.write(review_df.take(10), True)
+    #
+    # review_df.printSchema()
 
     # Persist this DataFrame to keep it in memory
     review_df.persist()
 
-    print("Example of first 20 words in our Vocab:")
-    print(vocab[:20])
+    log.write("Example of first 25 words in our Vocab:")
+    log.write(vocab[:25], True)
 
-    lda = LDA(k=10, seed=42, featuresCol='features')
-    model = lda.fit(review_df)
-
-    model_description = model.describeTopics(20)
-
-    # Let's save the model description
-    model_description.write.save('s3n://spark-talk/lda_model_description.json',
-                                 format='json')
-
-    sc.stop()
+    # lda = LDA(k=10, seed=42, featuresCol='features')
+    # model = lda.fit(review_df)
+    #
+    # model_description = model.describeTopics(20)
+    #
+    # # Let's save the model description
+    # model_description.write.save('s3n://spark-talk/lda_model_description.json',
+    #                              format='json')
+    #
+    # log.write("Done", True)
