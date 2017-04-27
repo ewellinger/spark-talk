@@ -29,7 +29,6 @@ from pyspark.sql.types import ArrayType, StringType
 import string
 import unicodedata
 from sklearn.feature_extraction.stop_words import ENGLISH_STOP_WORDS
-import spacy
 
 import nltk
 if '/home/hadoop/nltk_data' not in nltk.data.path:
@@ -154,9 +153,8 @@ def load_numpy_from_s3(bucket, fname):
     return np.load(temp)
 
 
-global nlp
 def extract_bow_from_raw_text(text_as_string):
-    """ Extracts bag-of-words from a raw text string.
+    """Extracts bag-of-words from a raw text string.
 
     Parameters
     ----------
@@ -166,89 +164,50 @@ def extract_bow_from_raw_text(text_as_string):
     -------
     list : the list of the tokens extracted and filtered from the text
     """
-    if '/home/hadoop/anaconda/lib/python2.7/site-packages' not in sys.path:
-        sys.path = ['/home/hadoop/anaconda/lib/python2.7/site-packages'] + sys.path
-    import spacy
-
     if (text_as_string == None):
         return []
 
     if (len(text_as_string) < 1):
         return []
 
-    # Run through spacy English module
-    global nlp
-    try:
-        doc = nlp(unicode(text_as_string))
-    except:
-        nlp = spacy.load('en', via='/mnt/spacy_en_data')
-        doc = nlp(unicode(text_as_string))
+    import nltk
+    if '/home/hadoop/nltk_data' not in nltk.data.path:
+        nltk.data.path.append('/home/hadoop/nltk_data')
 
-    # Part's of speech to keep in the result
-    pos_lst = ['ADJ', 'ADV', 'NOUN', 'PROPN', 'VERB']
+    nfkd_form = unicodedata.normalize('NFKD', unicode(text_as_string))
+    text_input = nfkd_form.encode('ASCII', 'ignore')
 
-    # Lemmatize text and split into tokens
-    tokens = [token.lemma_.lower() for token in doc if token.pos_ in pos_lst]
+    sent_tokens = sent_tokenize(text_input)
 
-    stop_words = {'book', 'author', 'read', "'", 'character'}.union(ENGLISH_STOP_WORDS)
+    tokens = map(word_tokenize, sent_tokens)
 
-    # Remove stop words
-    no_stop_tokens = [token for token in tokens if token not in stop_words]
+    sent_tags = map(pos_tag, tokens)
 
-    return(no_stop_tokens)
+    grammar = r"""
+        SENT: {<(J|N).*>}                # chunk sequences of proper nouns
+    """
 
+    cp = RegexpParser(grammar)
+    ret_tokens = list()
+    stemmer_snowball = SnowballStemmer('english')
 
-# def extract_bow_from_raw_text(text_as_string):
-#     """Extracts bag-of-words from a raw text string.
-#
-#     Parameters
-#     ----------
-#     text (str): a text document given as a string
-#
-#     Returns
-#     -------
-#     list : the list of the tokens extracted and filtered from the text
-#     """
-#     if (text_as_string == None):
-#         return []
-#
-#     if (len(text_as_string) < 1):
-#         return []
-#
-#     import nltk
-#     if '/home/hadoop/nltk_data' not in nltk.data.path:
-#         nltk.data.path.append('/home/hadoop/nltk_data')
-#
-#     nfkd_form = unicodedata.normalize('NFKD', unicode(text_as_string))
-#     text_input = nfkd_form.encode('ASCII', 'ignore')
-#
-#     sent_tokens = sent_tokenize(text_input)
-#
-#     tokens = map(word_tokenize, sent_tokens)
-#
-#     sent_tags = map(pos_tag, tokens)
-#
-#     grammar = r"""
-#         SENT: {<(J|N).*>}                # chunk sequences of proper nouns
-#     """
-#
-#     cp = RegexpParser(grammar)
-#     ret_tokens = list()
-#     stemmer_snowball = SnowballStemmer('english')
-#
-#     for sent in sent_tags:
-#         tree = cp.parse(sent)
-#         for subtree in tree.subtrees():
-#             if subtree.label() == 'SENT':
-#                 t_tokenlist = [tpos[0].lower() for tpos in subtree.leaves()]
-#                 t_tokens_stemsnowball = map(stemmer_snowball.stem, t_tokenlist)
-#                 #t_token = "-".join(t_tokens_stemsnowball)
-#                 #ret_tokens.append(t_token)
-#                 ret_tokens.extend(t_tokens_stemsnowball)
-#             #if subtree.label() == 'V2V': print(subtree)
-#     #tokens_lower = [map(string.lower, sent) for sent in tokens]
-#
-#     return(ret_tokens)
+    for sent in sent_tags:
+        tree = cp.parse(sent)
+        for subtree in tree.subtrees():
+            if subtree.label() == 'SENT':
+                t_tokenlist = [tpos[0].lower() for tpos in subtree.leaves()]
+                t_tokens_stemsnowball = map(stemmer_snowball.stem, t_tokenlist)
+                #t_token = "-".join(t_tokens_stemsnowball)
+                #ret_tokens.append(t_token)
+                ret_tokens.extend(t_tokens_stemsnowball)
+            #if subtree.label() == 'V2V': print(subtree)
+    #tokens_lower = [map(string.lower, sent) for sent in tokens]
+
+    stop_words = {'book', 'author', 'read', "'", 'character', ''}.union(ENGLISH_STOP_WORDS)
+
+    tokens = [token for token in ret_tokens if token not in stop_words]
+
+    return(tokens)
 
 
 def indexing_pipeline(input_df, **kwargs):
@@ -284,7 +243,7 @@ def indexing_pipeline(input_df, **kwargs):
 
 if __name__=='__main__':
     # Create logging object for writing to S3
-    log = S3Logging('spark-talk', 'application-log2.txt', overwrite_existing=True, redirect_stdout=True)
+    log = S3Logging('spark-talk', 'application-log.txt', overwrite_existing=True, redirect_stdout=True)
 
     print("Starting execution...")
     log.push_log()
@@ -294,6 +253,7 @@ if __name__=='__main__':
                 .appName("Spark Talk") \
                 .getOrCreate()
 
+    ''' Previously ran to subset full dataset down to 5% of original '''
     # # Use SparkSession to read in json object into Spark DataFrame
     # url = "s3n://spark-talk/reviews_Books_5.json.gz"
     # reviews = spark.read.json(url)
@@ -307,10 +267,7 @@ if __name__=='__main__':
     #                          format='json')
 
     url = 's3n://spark-talk/reviews_Books_subset5.json'
-    # review_subset = spark.read.json(url)
-
-    review = spark.read.json(url)
-    review_subset = review.sample(False, 0.05, 42)
+    review_subset = spark.read.json(url)
 
     count = review_subset.count()
     print("reviews_Books_subset5.json contains {} elements".format(count))
@@ -325,23 +282,23 @@ if __name__=='__main__':
     # Persist this DataFrame to keep it in memory
     review_df.persist()
 
-    # print the top 10 elements of the DataFrame and schema to the log
-    print(review_df.take(10))
+    # print the top 5 elements of the DataFrame and schema to the log
+    print(review_df.take(5))
     review_df.printSchema()
     log.push_log()
 
-    log.write("Example of first 50 words in our Vocab:")
-    log.write(vocab[:50], True)
+    print("Example of first 50 words in our Vocab:")
+    print(vocab[:50])
+    log.push_log()
 
     # Save vocab object to S3
     save_numpy_to_s3('spark-talk', 'vocab_array.npz', vocab=vocab)
 
-    lda = LDA(k=20, maxIter=10, seed=42, featuresCol='features', optimizer='online')
-    model = lda.fit(review_df)
+    for num_topics in [5, 10, 20]:
+        lda = LDA(k=num_topics, maxIter=10, seed=42, featuresCol='features')
+        model = lda.fit(review_df)
+        model_description = model.describeTopics(20)
+        model_descrip_path = 's3n://spark-talk/lda_{}_model_description'.format(num_topics)
 
-    model_description = model.describeTopics(20)
-
-    model_descrip_path = 's3n://spark-talk/lda_model_description'
-
-    # Let's save the model description
-    model_description.write.save(model_descrip_path, format='json')
+        # Let's save the model description
+        model_description.write.save(model_descrip_path, format='json')

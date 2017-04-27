@@ -1,10 +1,12 @@
 #!/bin/bash
 
-# Takes three arguments:
+# Takes four arguments:
 #   bucket name - one that has already been created
 #   name of key file - without .pem extension
+#   type of instance - type of instance to launch for master and core nodes
+#      e.g. m2.4xlarge would launch instances with 8 cores and 64 GB of RAM
 #   number of slave instances
-#      ex. bash launch_cluster.sh mybucket mypem 2
+#      ex. bash launch_cluster.sh myBucket myPem instanceType 2
 
 # Requires the awscli to be set up, need to have correct default region configured
 # Run `aws configure` to set this up
@@ -20,7 +22,7 @@ aws emr create-cluster \
     --ec2-attributes KeyName=$2 \
     --use-default-roles \
     --instance-groups \
-      InstanceGroupType=MASTER,InstanceCount=1,InstanceType=m2.4xlarge \
-      InstanceGroupType=CORE,InstanceCount=$3,InstanceType=m2.4xlarge \
+      InstanceGroupType=MASTER,InstanceCount=1,InstanceType=$3 \
+      InstanceGroupType=CORE,InstanceCount=$4,InstanceType=$3 \
     --bootstrap-actions Path=s3://$1/scripts/bootstrap-emr.sh \
     --configurations file://./myConfig.json
