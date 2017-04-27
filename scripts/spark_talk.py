@@ -17,8 +17,10 @@ sys.path = paths + sys.path
 # Import packages for S3Logging Class
 import boto3
 import botocore
-from io import StringIO
+from io import StringIO, BytesIO
 from datetime import datetime
+import numpy as np
+import pandas as pd
 
 # Import packages for spark application
 import pyspark as ps    # for the pyspark suite
@@ -96,7 +98,11 @@ class S3Logging(object):
 
         if not overwrite_existing and self._exists():
             body_obj = self._s3.get_object(Bucket=self.bucket, Key=self.key)['Body']
-            self._msg = str(body_obj.read(), 'utf-8')
+            # self._msg = str(body_obj.read(), 'utf-8')
+            if sys.version_info.major < 3:
+                self._msg = str(body_obj.read())
+            else:
+                self._msg = str(body_obj.read(), 'utf-8')
         else:
             self._msg = ''
 
@@ -105,7 +111,7 @@ class S3Logging(object):
             push = self._push
 
         # Append message with or without timestamp
-        if self._tstamp:
+        if self._tstamp and bool(msg):
             self._msg += "\n{0}\n{1}\n".format(datetime.now(), msg)
         else:
             self._msg += "\n{0}\n".format(msg)
@@ -120,6 +126,9 @@ class S3Logging(object):
             f_handle = StringIO(self._msg)
         self._s3.put_object(Bucket=self.bucket, Key=self.key, Body=f_handle.read())
 
+    def restore_stdout(self):
+        sys.stdout = sys.__stdout__
+
 
     def _exists(self):
         bucket = boto3.resource('s3').Bucket(self.bucket)
@@ -130,56 +139,24 @@ class S3Logging(object):
         return self._msg
 
 
-# def extract_bow_from_raw_text(text_as_string):
-#     """ Extracts bag-of-words from a raw text string.
-#
-#     Parameters
-#     ----------
-#     text (str): a text document given as a string
-#
-#     Returns
-#     -------
-#     list : the list of the tokens extracted and filtered from the text
-#     """
-#     if '/home/hadoop/anaconda/lib/python2.7/site-packages' not in sys.path:
-#         sys.path = ['/home/hadoop/anaconda/lib/python2.7/site-packages'] + sys.path
-#     import spacy
-#
-#     if (text_as_string == None):
-#         return []
-#
-#     if (len(text_as_string) < 1):
-#         return []
-#
-#     # Load nlp object if it isn't accessible
-#     if 'nlp' not in globals():
-#         global nlp
-#         try:
-#             # When running locally
-#             nlp = spacy.load('en')
-#         except RuntimeError:
-#             # When running on AWS EMR Cluster
-#             nlp = spacy.load('en', via='/mnt/spacy_en_data/')
-#
-#     # Run through spacy English module
-#     doc = nlp(unicode(text_as_string))
-#
-#     # Part's of speech to keep in the result
-#     pos_lst = ['ADJ', 'ADV', 'NOUN', 'PROPN', 'VERB']
-#
-#     # Lemmatize text and split into tokens
-#     tokens = [token.lemma_.lower() for token in doc if token.pos_ in pos_lst]
-#
-#     stop_words = {'book', 'author', 'read', "'", 'character'}.union(ENGLISH_STOP_WORDS)
-#
-#     # Remove stop words
-#     no_stop_tokens = [token for token in tokens if token not in stop_words]
-#
-#     return(no_stop_tokens)
+def save_numpy_to_s3(bucket, fname, *args, **kwds):
+    s3 = boto3.client('s3')
+    temp = BytesIO()
+    np.savez(temp, *args, **kwds)
+    temp.seek(0)
+    s3.put_object(Bucket=bucket, Key=fname, Body=temp.read())
 
 
+def load_numpy_from_s3(bucket, fname):
+    s3 = boto3.client('s3')
+    body_obj = s3.get_object(Bucket=bucket, Key=fname)['Body']
+    temp = BytesIO(body_obj.read())
+    return np.load(temp)
+
+
+global nlp
 def extract_bow_from_raw_text(text_as_string):
-    """Extracts bag-of-words from a raw text string.
+    """ Extracts bag-of-words from a raw text string.
 
     Parameters
     ----------
@@ -189,42 +166,89 @@ def extract_bow_from_raw_text(text_as_string):
     -------
     list : the list of the tokens extracted and filtered from the text
     """
+    if '/home/hadoop/anaconda/lib/python2.7/site-packages' not in sys.path:
+        sys.path = ['/home/hadoop/anaconda/lib/python2.7/site-packages'] + sys.path
+    import spacy
+
     if (text_as_string == None):
         return []
 
     if (len(text_as_string) < 1):
         return []
 
-    nfkd_form = unicodedata.normalize('NFKD', unicode(text_as_string))
-    text_input = nfkd_form.encode('ASCII', 'ignore')
+    # Run through spacy English module
+    global nlp
+    try:
+        doc = nlp(unicode(text_as_string))
+    except:
+        nlp = spacy.load('en', via='/mnt/spacy_en_data')
+        doc = nlp(unicode(text_as_string))
 
-    sent_tokens = sent_tokenize(text_input)
+    # Part's of speech to keep in the result
+    pos_lst = ['ADJ', 'ADV', 'NOUN', 'PROPN', 'VERB']
 
-    tokens = map(word_tokenize, sent_tokens)
+    # Lemmatize text and split into tokens
+    tokens = [token.lemma_.lower() for token in doc if token.pos_ in pos_lst]
 
-    sent_tags = map(pos_tag, tokens)
+    stop_words = {'book', 'author', 'read', "'", 'character'}.union(ENGLISH_STOP_WORDS)
 
-    grammar = r"""
-        SENT: {<(J|N).*>}                # chunk sequences of proper nouns
-    """
+    # Remove stop words
+    no_stop_tokens = [token for token in tokens if token not in stop_words]
 
-    cp = RegexpParser(grammar)
-    ret_tokens = list()
-    stemmer_snowball = SnowballStemmer('english')
+    return(no_stop_tokens)
 
-    for sent in sent_tags:
-        tree = cp.parse(sent)
-        for subtree in tree.subtrees():
-            if subtree.label() == 'SENT':
-                t_tokenlist = [tpos[0].lower() for tpos in subtree.leaves()]
-                t_tokens_stemsnowball = map(stemmer_snowball.stem, t_tokenlist)
-                #t_token = "-".join(t_tokens_stemsnowball)
-                #ret_tokens.append(t_token)
-                ret_tokens.extend(t_tokens_stemsnowball)
-            #if subtree.label() == 'V2V': print(subtree)
-    #tokens_lower = [map(string.lower, sent) for sent in tokens]
 
-    return(ret_tokens)
+# def extract_bow_from_raw_text(text_as_string):
+#     """Extracts bag-of-words from a raw text string.
+#
+#     Parameters
+#     ----------
+#     text (str): a text document given as a string
+#
+#     Returns
+#     -------
+#     list : the list of the tokens extracted and filtered from the text
+#     """
+#     if (text_as_string == None):
+#         return []
+#
+#     if (len(text_as_string) < 1):
+#         return []
+#
+#     import nltk
+#     if '/home/hadoop/nltk_data' not in nltk.data.path:
+#         nltk.data.path.append('/home/hadoop/nltk_data')
+#
+#     nfkd_form = unicodedata.normalize('NFKD', unicode(text_as_string))
+#     text_input = nfkd_form.encode('ASCII', 'ignore')
+#
+#     sent_tokens = sent_tokenize(text_input)
+#
+#     tokens = map(word_tokenize, sent_tokens)
+#
+#     sent_tags = map(pos_tag, tokens)
+#
+#     grammar = r"""
+#         SENT: {<(J|N).*>}                # chunk sequences of proper nouns
+#     """
+#
+#     cp = RegexpParser(grammar)
+#     ret_tokens = list()
+#     stemmer_snowball = SnowballStemmer('english')
+#
+#     for sent in sent_tags:
+#         tree = cp.parse(sent)
+#         for subtree in tree.subtrees():
+#             if subtree.label() == 'SENT':
+#                 t_tokenlist = [tpos[0].lower() for tpos in subtree.leaves()]
+#                 t_tokens_stemsnowball = map(stemmer_snowball.stem, t_tokenlist)
+#                 #t_token = "-".join(t_tokens_stemsnowball)
+#                 #ret_tokens.append(t_token)
+#                 ret_tokens.extend(t_tokens_stemsnowball)
+#             #if subtree.label() == 'V2V': print(subtree)
+#     #tokens_lower = [map(string.lower, sent) for sent in tokens]
+#
+#     return(ret_tokens)
 
 
 def indexing_pipeline(input_df, **kwargs):
@@ -260,7 +284,7 @@ def indexing_pipeline(input_df, **kwargs):
 
 if __name__=='__main__':
     # Create logging object for writing to S3
-    log = S3Logging('spark-talk', 'application-log.txt', overwrite_existing=True, redirect_stdout=True)
+    log = S3Logging('spark-talk', 'application-log2.txt', overwrite_existing=True, redirect_stdout=True)
 
     print("Starting execution...")
     log.push_log()
@@ -270,15 +294,9 @@ if __name__=='__main__':
                 .appName("Spark Talk") \
                 .getOrCreate()
 
-    # Extract Spark Context from SparkSession object
-    # sc = spark.sparkContext
-    # sc.setLogLevel('ERROR')
-
     # # Use SparkSession to read in json object into Spark DataFrame
     # url = "s3n://spark-talk/reviews_Books_5.json.gz"
     # reviews = spark.read.json(url)
-    #
-    # # log.write(reviews.printSchema(), True)
     #
     # # Let's subset our DataFrame to keep 5% of the reviews
     # review_subset = reviews.select('reviewText', 'overall') \
@@ -289,9 +307,10 @@ if __name__=='__main__':
     #                          format='json')
 
     url = 's3n://spark-talk/reviews_Books_subset5.json'
-    review_subset = spark.read.json(url)
+    # review_subset = spark.read.json(url)
 
-    # review_subset = review.sample(False, 0.05, 42)
+    review = spark.read.json(url)
+    review_subset = review.sample(False, 0.05, 42)
 
     count = review_subset.count()
     print("reviews_Books_subset5.json contains {} elements".format(count))
@@ -307,22 +326,22 @@ if __name__=='__main__':
     review_df.persist()
 
     # print the top 10 elements of the DataFrame and schema to the log
-    review_df.take(10)
+    print(review_df.take(10))
     review_df.printSchema()
     log.push_log()
 
     log.write("Example of first 50 words in our Vocab:")
     log.write(vocab[:50], True)
 
-    # review_df.write.save("TokenizedReviewData.parquet", format="parquet")
+    # Save vocab object to S3
+    save_numpy_to_s3('spark-talk', 'vocab_array.npz', vocab=vocab)
 
-    lda = LDA(k=10, maxIter=10, seed=42, featuresCol='features', optimizer='online')
+    lda = LDA(k=20, maxIter=10, seed=42, featuresCol='features', optimizer='online')
     model = lda.fit(review_df)
 
     model_description = model.describeTopics(20)
 
-    # Let's save the model description
-    model_description.write.save('s3n://spark-talk/lda_model_description.json',
-                                 format='json')
+    model_descrip_path = 's3n://spark-talk/lda_model_description'
 
-    log.write("Done", True)
+    # Let's save the model description
+    model_description.write.save(model_descrip_path, format='json')

@@ -34,7 +34,8 @@ ipython -c "import sputnik; \
 import spacy; \
 sputnik.install('spacy', spacy.about.__version__, 'en', data_path='/mnt/spacy_en_data/')"
 
-ipython -c "import nltk; nltk.download('all')"
+ipython -c "import nltk; nltk.download('stopwords'); nltk.download('punkt'); \
+nltk.download('averaged_perceptron_tagger')"
 
 # Record ending time
 touch $HOME/.bootstrap-end
